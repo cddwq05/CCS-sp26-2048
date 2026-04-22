@@ -125,9 +125,10 @@ Make sure you have Python installed.
 
 To run the main batch experiment:
 
-```bash
+'''bash
 python run_experiments.py
+'''
 
 ## Authors
 
-CCS Final Project Team
+CCS Final Project Team: dwq, Clover, lqy, scf
