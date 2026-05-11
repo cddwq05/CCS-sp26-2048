@@ -3,15 +3,33 @@
 The current project uses a fixed bottom-right target corner. These utilities
 are intentionally small and easy to adjust for course experiments.
 """
-
+import math
 
 DEFAULT_WEIGHTS = {
-    "corner": 1000.0,
-    "monotonicity": 1.0,
-    "empty": 50.0,
-    "merge": 25.0,
+    "corner": 3.0,
+    "monotonicity": 2.5,
+    "empty": 2.0,
+    "merge": 1.2,
 }
 
+FEATURE_RANGES = {
+    "corner": (0.0, 10.0),
+    "monotonicity": (-21.0, 36.0),
+    "empty": (0.0, 14.0),
+    "merge": (0.0, 8.0),
+}
+
+def normalize_feature(value, feature_name):
+    """Normalize one feature value to approximately 0–1 using observed ranges."""
+    min_value, max_value = FEATURE_RANGES[feature_name]
+
+    if max_value == min_value:
+        return 0
+
+    normalized = (value - min_value) / (max_value - min_value)
+
+    # Keep values in [0, 1] in case future boards slightly exceed observed range.
+    return max(0, min(1, normalized))
 
 def get_default_weights():
     """Return a copy of the default heuristic weights."""
@@ -51,7 +69,7 @@ def corner_score(board, target_corner="bottom_right"):
 
     highest_tile = get_highest_tile(board)
     if board[-1][-1] == highest_tile:
-        return highest_tile
+        return math.log2(highest_tile) 
     return 0
 
 
@@ -97,23 +115,33 @@ def merge_potential(board):
 
 
 def evaluate_board(board, target_corner="bottom_right", weights=None):
-    """Combine simple board features into a single heuristic score."""
+    """Combine normalized board features into a single heuristic score."""
     _require_bottom_right(target_corner)
     weights = resolve_weights(weights)
 
+    raw_corner = corner_score(board, target_corner)
+    raw_monotonicity = monotonicity_score(board, target_corner)
+    raw_empty = count_empty_cells(board)
+    raw_merge = merge_potential(board)
+
+    corner = normalize_feature(raw_corner, "corner")
+    monotonicity = normalize_feature(raw_monotonicity, "monotonicity")
+    empty = normalize_feature(raw_empty, "empty")
+    merge = normalize_feature(raw_merge, "merge")
+
     return (
-        weights.get("corner", 0) * corner_score(board, target_corner)
-        + weights.get("monotonicity", 0) * monotonicity_score(board, target_corner)
-        + weights.get("empty", 0) * count_empty_cells(board)
-        + weights.get("merge", 0) * merge_potential(board)
+        weights.get("corner", 0) * corner
+        + weights.get("monotonicity", 0) * monotonicity
+        + weights.get("empty", 0) * empty
+        + weights.get("merge", 0) * merge
     )
 
 
 def _ordered_pair_score(first, second):
     """Reward nondecreasing neighbors and penalize decreasing neighbors."""
-    if first <= second:
-        return second - first
-    return -(first - second)
+    if first == 0 or second == 0:
+        return 0
+    return math.log2(second) - math.log2(first)
 
 
 def _require_bottom_right(target_corner):
