@@ -20,17 +20,32 @@ def play_one_game(agent, seed=None, record_trajectory=False, start_tiles=2):
     """
     env = Game2048Env(seed=seed, start_tiles=start_tiles)
     env.reset()
+    if hasattr(agent, "reset"):
+        agent.reset()
 
     trajectory = [] if record_trajectory else None
     steps = 0
     corner_steps = 0
+
+    deviation_steps = 0
+    risky_steps = 0
+    risk_reason_counts = {}
 
     while not env.done:
         action, decision_info = _select_action_with_optional_info(agent, env)
         if action is None:
             env.is_terminal()
             break
+        
+        if decision_info.get("is_deviation_step"):
+            deviation_steps += 1
 
+        if decision_info.get("is_risky_state"):
+            risky_steps += 1
+
+        for reason in decision_info.get("risk_reasons", []):
+            risk_reason_counts[reason] = risk_reason_counts.get(reason, 0) + 1
+            
         board_before = env.get_state()
         highest_tile_before = get_highest_tile(board_before)
         max_in_corner_before = _max_in_bottom_right_corner(board_before)
@@ -72,6 +87,11 @@ def play_one_game(agent, seed=None, record_trajectory=False, start_tiles=2):
         "status": env.status,
         "won": env.status == "WON",
         "corner_stability": corner_stability,
+
+        "deviation_steps": deviation_steps,
+        "risky_steps": risky_steps,
+        "risk_reason_counts": risk_reason_counts,
+
         "trajectory": trajectory,
     }
 
@@ -121,10 +141,35 @@ def summarize_results(results):
     final_scores = [result["final_score"] for result in results]
     highest_tiles = [result["highest_tile"] for result in results]
     steps = [result["steps"] for result in results]
+    score_efficiencies = [
+        result["final_score"] / result["steps"]
+        if result["steps"] > 0 else 0
+        for result in results
+    ]
     wins = [result["won"] for result in results]
     corner_stabilities = [result.get("corner_stability", 0) for result in results]
     tile_distribution = _highest_tile_distribution(highest_tiles)
+    deviation_steps = [result.get("deviation_steps", 0) for result in results]
+    risky_steps = [result.get("risky_steps", 0) for result in results]
 
+    total_steps = sum(steps)
+    total_deviation_steps = sum(deviation_steps)
+    total_risky_steps = sum(risky_steps)
+
+    risk_reason_totals = {}
+    for result in results:
+        for reason, count in result.get("risk_reason_counts", {}).items():
+            risk_reason_totals[reason] = risk_reason_totals.get(reason, 0) + count
+
+    deviation_step_rate = (
+        total_deviation_steps / total_steps
+        if total_steps > 0 else 0
+    )
+
+    risky_step_rate = (
+        total_risky_steps / total_steps
+        if total_steps > 0 else 0
+    )
     return {
         "games": len(results),
         "mean_final_score": statistics.mean(final_scores),
@@ -133,6 +178,7 @@ def summarize_results(results):
         "mean_highest_tile": statistics.mean(highest_tiles),
         "max_highest_tile": max(highest_tiles),
         "mean_steps": statistics.mean(steps),
+        "mean_score_efficiency": statistics.mean(score_efficiencies),
         "win_rate": sum(wins) / len(wins),
         "highest_tile_distribution": tile_distribution,
         "highest_tile_distribution_rate": {
@@ -140,6 +186,11 @@ def summarize_results(results):
             for milestone, count in tile_distribution.items()
         },
         "corner_stability_mean": statistics.mean(corner_stabilities),
+        "total_deviation_steps": total_deviation_steps,
+        "deviation_step_rate": deviation_step_rate,
+        "total_risky_steps": total_risky_steps,
+        "risky_step_rate": risky_step_rate,
+        "risk_reason_totals": risk_reason_totals,
     }
 
 
