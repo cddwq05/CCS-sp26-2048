@@ -1,5 +1,6 @@
 """Agent implementations for the 2048 environment."""
 
+import math
 import random
 
 from heuristics import (
@@ -104,6 +105,100 @@ class RigidCornerAgent:
         return format_weights(self.weights)
 
 
+class SoftmaxAgent:
+    """Choose among legal actions using softmax over one-step heuristic scores.
+
+    A lower temperature makes the agent behave more like RigidCornerAgent.
+    A higher temperature makes the action choice more exploratory/random.
+    """
+
+    def __init__(self, temperature=0.25, seed=None, target_corner="bottom_right", weights=None):
+        if temperature <= 0:
+            raise ValueError("temperature must be positive")
+
+        self.temperature = temperature
+        self.rng = random.Random(seed)
+        self.target_corner = target_corner
+        self.weights = resolve_weights(weights)
+
+    def select_action(self, env):
+        """Return one sampled legal action, or None if no legal actions exist."""
+        action, _ = self.select_action_with_info(env)
+        return action
+
+    def select_action_with_info(self, env):
+        """Return (action, info) with softmax probabilities for diagnostics."""
+        scores = self.score_legal_actions(env)
+        if not scores:
+            return None, {
+                "agent": self.__class__.__name__,
+                "action_scores": {},
+                "action_probabilities": {},
+                "chosen_action": None,
+                "is_random_action": True,
+                "is_deviation_step": None,
+                "temperature": self.temperature,
+                "weights": self.get_weight_summary(),
+            }
+
+        probabilities = self._softmax(scores)
+        action = self._sample_action(probabilities)
+
+        return action, {
+            "agent": self.__class__.__name__,
+            "action_scores": scores,
+            "action_probabilities": probabilities,
+            "chosen_action": action,
+            "is_random_action": True,
+            "is_deviation_step": None,
+            "temperature": self.temperature,
+            "weights": self.get_weight_summary(),
+        }
+
+    def score_legal_actions(self, env):
+        """Return a dictionary mapping each legal action to its board score."""
+        action_scores = {}
+
+        for action in env.get_legal_actions():
+            board_after, changed, _ = env.simulate_action(action)
+            if changed:
+                action_scores[action] = evaluate_board(
+                    board_after,
+                    target_corner=self.target_corner,
+                    weights=self.weights,
+                )
+
+        return action_scores
+
+    def get_weight_summary(self):
+        """Return a display-friendly summary of active heuristic weights."""
+        return format_weights(self.weights)
+
+    def _softmax(self, scores):
+        max_score = max(scores.values())
+        exp_scores = {
+            action: math.exp((score - max_score) / self.temperature)
+            for action, score in scores.items()
+        }
+        total = sum(exp_scores.values())
+        return {
+            action: exp_score / total
+            for action, exp_score in exp_scores.items()
+        }
+
+    def _sample_action(self, probabilities):
+        threshold = self.rng.random()
+        cumulative = 0
+
+        for action, probability in probabilities.items():
+            cumulative += probability
+            if threshold <= cumulative:
+                return action
+
+        # Floating-point fallback.
+        return next(reversed(probabilities))
+
+
 class RandomDeviationAgent:
     """Mostly follow the rigid heuristic, but sometimes choose another action."""
 
@@ -200,12 +295,10 @@ class ControlledDeviationAgent:
     """
 
     DEFAULT_DEVIATION_WEIGHTS = {
-        # Compared with the rigid defaults, corner pressure is reduced while
-        # empty-space and merge opportunities are emphasized for survival.
-        "corner": 250.0,
-        "monotonicity": 1.0,
-        "empty": 100.0,
-        "merge": 75.0,
+        "corner": 2.3,
+        "monotonicity": 2.0,
+        "empty": 2.5,
+        "merge": 1.8,
     }
 
     def __init__(
